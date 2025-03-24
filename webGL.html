@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL Glowing Line</title>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+<canvas id="webgl-canvas"></canvas>
+<script>
+    const canvas = document.getElementById("webgl-canvas");
+    const gl = canvas.getContext("webgl");
+    if (!gl) {
+        console.error("WebGL not supported");
+    }
+
+    // Set canvas size
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    // Vertex Shader code
+    const vertexShaderSource = `
+    attribute vec3 position;
+    uniform float time;
+    void main() {
+        // Animate points to create flowing line effect
+        float xOffset = sin(position.x + time) * 0.5;
+        float yOffset = cos(position.y + time) * 0.5;
+        gl_Position = vec4(position.x + xOffset, position.y + yOffset, position.z, 1.0);
+    }`;
+
+    // Fragment Shader code (Glow effect)
+    const fragmentShaderSource = `
+    precision mediump float;
+    uniform vec4 color;
+    void main() {
+        gl_FragColor = color;
+    }`;
+
+    // Function to compile shaders
+    function createShader(type, source) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+            console.error("Shader compile failed", gl.getShaderInfoLog(shader));
+        }
+        return shader;
+    }
+
+    // Create vertex and fragment shaders
+    const vertexShader = createShader(gl.VERTEX_SHADER, vertexShaderSource);
+    const fragmentShader = createShader(gl.FRAGMENT_SHADER, fragmentShaderSource);
+
+    // Create and link the shader program
+    const shaderProgram = gl.createProgram();
+    gl.attachShader(shaderProgram, vertexShader);
+    gl.attachShader(shaderProgram, fragmentShader);
+    gl.linkProgram(shaderProgram);
+    if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+        console.error("Shader program linking failed", gl.getProgramInfoLog(shaderProgram));
+    }
+    gl.useProgram(shaderProgram);
+
+    // Define points for the line geometry (particle system)
+    const numPoints = 1000;
+    const positions = new Float32Array(numPoints * 3);
+    for (let i = 0; i < numPoints; i++) {
+        positions[i * 3] = Math.sin(i * 0.05);      // x-coordinate
+        positions[i * 3 + 1] = Math.cos(i * 0.05);  // y-coordinate
+        positions[i * 3 + 2] = 0.0;                 // z-coordinate (flat)
+    }
+
+    // Create a buffer to hold the position data
+    const positionBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+
+    // Get attribute and uniform locations
+    const positionLocation = gl.getAttribLocation(shaderProgram, "position");
+    const timeLocation = gl.getUniformLocation(shaderProgram, "time");
+    const colorLocation = gl.getUniformLocation(shaderProgram, "color");
+
+    // Set up vertex attributes
+    gl.vertexAttribPointer(positionLocation, 3, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(positionLocation);
+
+    // Set the color of the glowing effect (light blue)
+    gl.uniform4f(colorLocation, 0.0, 1.0, 1.0, 1.0);  // Cyan color
+
+    // Set up a basic animation loop
+    let startTime = Date.now();
+    function animate() {
+        gl.clear(gl.COLOR_BUFFER_BIT);
+
+        // Calculate the time elapsed
+        const time = (Date.now() - startTime) / 1000;
+        gl.uniform1f(timeLocation, time);  // Pass the time uniform to the shaders
+
+        // Draw the line as points
+        gl.drawArrays(gl.POINTS, 0, numPoints);
+
+        // Call animate again on the next frame
+        requestAnimationFrame(animate);
+    }
+
+    // Initialize and start the animation loop
+    animate();
+</script>
+</body>
+</html>

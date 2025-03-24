@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Wavy Lines Without Swirl</title>
+  <style>
+    html, body {
+      margin: 0; 
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background: #000;
+      overflow: hidden;
+      cursor: default;
+    }
+    #container {
+      width: 100%;
+      height: 100%;
+      position: relative;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+  </style>
+</head>
+<body>
+<div id="container">
+  <canvas id="glcanvas"></canvas>
+</div>
+
+<script>
+/*
+  Changes from previous code:
+    1) The color is now vec3(0.376, 0.827, 0.969) in the fragment shader,
+       instead of cyan.
+    2) We removed the swirl transform. So we no longer call iterativeSwirl.
+       The lines remain in the wavy positions determined by:
+         y = centerY + width * aOffset + paramSpaceWave
+       plus the wave speed logic for the vertical oscillations.
+
+  The rest is the same:
+    - 20 lines
+    - Subtle wavy shape in param space
+    - The wave speed depends on mouse movement
+    - alpha = (0.7 + 0.5*vRandom)
+
+  Result:
+    The lines do not swirl around. They remain in a 2D wave pattern that
+    speeds up or slows down based on mouse velocity.
+*/
+
+//===========================================
+// 1) Vertex Shader
+//===========================================
+const vertexShaderSource = `
+  precision mediump float;
+
+  // Attributes
+  attribute float aParam;       // [0..1] => horizontal param
+  attribute float aOffset;      // [-1..1], offset from line center
+  attribute float aLineID;      // 0..19
+  attribute float aRandom;      // random factor for alpha/size
+
+  // Uniforms
+  uniform float uTime;
+  uniform float uMouseSpeed;
+
+  varying float vRandom;
+
+  //-------------------------------------------
+  // lineCenterWidth:
+  //   wave-based center: if mouse speed is high => wave speeds up
+  //-------------------------------------------
+  vec2 lineCenterWidth(float lineID, float t, float mouseSpd) {
+    float i = floor(lineID + 0.5);
+    float ratio = i / 19.0;
+
+    float baseCenter = mix(-0.3, 0.3, ratio);
+    float baseWidth  = 0.05;
+
+    float timeOffset = i * 0.3;
+    float localTime  = t + timeOffset;
+
+    // Speed up wave if mouse moves quickly
+    float spd = clamp(mouseSpd, 0.0, 1.0);
+    localTime *= (1.0 + 3.0 * spd);
+
+    float angle    = localTime + i;
+    float mainWave = sin(angle);
+    float cubic    = pow(mainWave, 3.0);
+
+    float animCenter = baseCenter
+                     + 0.25 * mainWave
+                     + 0.05 * cubic;
+
+    float animWidth  = baseWidth
+                     + 0.3 * cos(0.7 * localTime + i * 2.0);
+
+    return vec2(animCenter, animWidth);
+  }
+
+  void main() {
+    // 1) x in [-1..1]
+    float x = mix(-1.0, 1.0, aParam);
+
+    // 2) wave-based vertical position
+    vec2 cw = lineCenterWidth(aLineID, uTime, uMouseSpeed);
+    float centerY = cw.x;
+    float width   = cw.y;
+
+    float y = centerY + width * aOffset;
+
+    // 3) subtle param-space wave => not perfectly horizontal
+    float i = floor(aLineID + 0.5);
+    float waveAmp   = 0.02;
+    float waveFreq  = 6.0 + 0.5 * i;
+    float wavePhase = uTime + i;
+    float waveShift = waveAmp * sin(waveFreq * aParam + wavePhase);
+    y += waveShift;
+
+    // 4) No swirl transform. 
+    //    So final position is simply (x, y, 0, 1).
+    gl_Position = vec4(x, y, 0.0, 1.0);
+
+    // 5) point size
+    float baseSize = 3.0;
+    float sizeVar  = 2.0 * aRandom;
+    gl_PointSize = baseSize + sizeVar;
+
+    vRandom = aRandom;
+  }
+`;
+
+//===========================================
+// 2) Fragment Shader
+//===========================================
+const fragmentShaderSource = `
+  precision mediump float;
+
+  varying float vRandom;
+
+  void main() {
+    vec2 coord = gl_PointCoord - 0.5;
+    float dist = length(coord);
+
+    // sharper disc fade
+    float alpha = smoothstep(0.2, 0.01, dist);
+
+    // alpha = (0.7 + 0.5*vRandom)
+    alpha *= (0.7 + 0.5 * vRandom);
+
+    // Use your color: vec3(0.376, 0.827, 0.969)
+    vec3 color = vec3(0.376, 0.827, 0.969);
+
+    gl_FragColor = vec4(color, alpha);
+  }
+`;
+
+//===========================================
+// 3) WebGL Setup
+//===========================================
+const canvas = document.getElementById("glcanvas");
+const gl = canvas.getContext("webgl", { alpha: false });
+if (!gl) {
+  alert("WebGL not supported");
+  throw new Error("WebGL not supported");
+}
+
+function resizeCanvas(){
+  canvas.width  = canvas.clientWidth;
+  canvas.height = canvas.clientHeight;
+  gl.viewport(0,0,canvas.width,canvas.height);
+}
+window.addEventListener("resize", resizeCanvas);
+resizeCanvas();
+
+function compileShader(src, type){
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if(!gl.getShaderParameter(s, gl.COMPILE_STATUS)){
+    console.error("Shader compile error:", gl.getShaderInfoLog(s));
+    gl.deleteShader(s);
+    return null;
+  }
+  return s;
+}
+function createProgram(vsSrc, fsSrc){
+  const vs = compileShader(vsSrc, gl.VERTEX_SHADER);
+  const fs = compileShader(fsSrc, gl.FRAGMENT_SHADER);
+  const prog = gl.createProgram();
+  gl.attachShader(prog, vs);
+  gl.attachShader(prog, fs);
+  gl.linkProgram(prog);
+  if(!gl.getProgramParameter(prog, gl.LINK_STATUS)){
+    console.error("Program link error:", gl.getProgramInfoLog(prog));
+  }
+  return prog;
+}
+const program = createProgram(vertexShaderSource, fragmentShaderSource);
+gl.useProgram(program);
+
+const aParamLoc       = gl.getAttribLocation(program, "aParam");
+const aOffsetLoc      = gl.getAttribLocation(program, "aOffset");
+const aLineIDLoc      = gl.getAttribLocation(program, "aLineID");
+const aRandomLoc      = gl.getAttribLocation(program, "aRandom");
+
+const uTimeLoc        = gl.getUniformLocation(program, "uTime");
+const uMouseSpeedLoc  = gl.getUniformLocation(program, "uMouseSpeed");
+
+//===========================================
+// 4) Generate Particles
+//===========================================
+const NUM_PARTICLES = 30000;
+const NUM_LINES     = 20;
+// We'll store [aParam, aOffset, aLineID, aRandom]
+const floatsPerParticle = 4;
+const particleData = new Float32Array(NUM_PARTICLES * floatsPerParticle);
+
+for(let i=0; i<NUM_PARTICLES; i++){
+  let idx = i*floatsPerParticle;
+  let param  = Math.random();         // [0..1]
+  let offset = Math.random()*2.0-1.0; // [-1..1]
+  let lineID = Math.floor(Math.random()*NUM_LINES);
+  let rnd    = Math.random();
+
+  particleData[idx+0] = param;
+  particleData[idx+1] = offset;
+  particleData[idx+2] = lineID;
+  particleData[idx+3] = rnd;
+}
+
+const particleBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, particleBuffer);
+gl.bufferData(gl.ARRAY_BUFFER, particleData, gl.STATIC_DRAW);
+
+const stride = floatsPerParticle*4;
+// aParam
+gl.enableVertexAttribArray(aParamLoc);
+gl.vertexAttribPointer(aParamLoc,1, gl.FLOAT, false, stride, 0);
+// aOffset
+gl.enableVertexAttribArray(aOffsetLoc);
+gl.vertexAttribPointer(aOffsetLoc,1, gl.FLOAT, false, stride, 4);
+// aLineID
+gl.enableVertexAttribArray(aLineIDLoc);
+gl.vertexAttribPointer(aLineIDLoc,1, gl.FLOAT, false, stride, 8);
+// aRandom
+gl.enableVertexAttribArray(aRandomLoc);
+gl.vertexAttribPointer(aRandomLoc,1, gl.FLOAT, false, stride,12);
+
+//===========================================
+// 5) Blending
+//===========================================
+gl.enable(gl.BLEND);
+gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+//===========================================
+// 6) Mouse-based wave speed
+//    same approach => measure distance between events => store in mouseSpeed
+//===========================================
+let mouseSpeed=0.0;
+let lastX=0, lastY=0, firstMove=true;
+canvas.addEventListener("mousemove",(e)=>{
+  const rect=canvas.getBoundingClientRect();
+  let mx=e.clientX - rect.left;
+  let my=e.clientY - rect.top;
+  if(firstMove){ lastX=mx; lastY=my; firstMove=false; return; }
+  let dx=mx-lastX;
+  let dy=my-lastY;
+  let dist=Math.sqrt(dx*dx+dy*dy);
+  dist=Math.min(dist,30.0);
+  mouseSpeed=dist/30.0;
+  lastX=mx; lastY=my;
+});
+
+//===========================================
+// 7) Render
+//===========================================
+function render(timeMs){
+  let timeSec = timeMs*0.001;
+  gl.useProgram(program);
+
+  gl.uniform1f(uTimeLoc, timeSec);
+  gl.uniform1f(uMouseSpeedLoc, mouseSpeed);
+
+  gl.clearColor(0,0,0,1);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+
+  gl.drawArrays(gl.POINTS, 0, NUM_PARTICLES);
+
+  // decay
+  mouseSpeed*=0.9;
+
+  requestAnimationFrame(render);
+}
+requestAnimationFrame(render);
+</script>
+</body>
+</html>
