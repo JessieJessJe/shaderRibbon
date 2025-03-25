@@ -54,16 +54,15 @@
         uniform float u_time;
         uniform vec2 u_resolution;
         uniform vec2 u_mouse;
-        
         varying vec2 v_texCoord;
-        
+
         // Function to create particles flowing along the bright path
         float createParticles(vec2 uv, float brightness, float time) {
             // Create multiple particle waves with different speeds and phases
             float particles = 0.0;
             
             // Base particle flow
-            float baseFlow = fract(brightness * 2.0 - time * 0.2);
+            float baseFlow = fract(brightness * 1.0 - time * 0.2);
             float particleBase = smoothstep(0.0, 0.1, baseFlow) * smoothstep(1.0, 0.9, baseFlow);
             
             // Secondary particle flow (different speed)
@@ -71,7 +70,7 @@
             float particleSecond = smoothstep(0.0, 0.05, secondFlow) * smoothstep(1.0, 0.95, secondFlow);
             
             // Combine particle effects
-            particles = max(particleBase * 0.8, particleSecond * 0.6);
+            particles = 1.5 - max(particleBase * 0.8, particleSecond * 0.6);
             
             return particles;
         }
@@ -82,49 +81,51 @@
             
             // Calculate the brightness of the current pixel
             float brightness = (texColor.r + texColor.g + texColor.b) / 3.0;
-            
-            // Create a threshold to isolate the bright infinity path
-            float pathMask = smoothstep(0.3, 0.5, brightness);
-            
-            // Create subtle animation to make the path "breathe"
-            float breathing = 0.05 * sin(u_time * 0.5);
-            
+
+                        
             // Apply a subtle distortion effect
             vec2 distortion = vec2(
-                sin(v_texCoord.y * 10.0 + u_time * 0.2) * 0.002,
-                cos(v_texCoord.x * 10.0 + u_time * 0.2) * 0.002
+                sin(v_texCoord.y * 1.0 + u_time * 0.2) * 0.05,
+                cos(v_texCoord.x * 1.0 + u_time * 0.2) * 0.05
             );
-            
-            // Apply mouse influence when available
-            vec2 mouse = u_mouse / u_resolution;
+
             float mouseInfluence = 0.0;
+            float mouseDist = 0.0;
+            vec2 mouse = u_mouse / u_resolution;
+
             if (mouse.x > 0.0 || mouse.y > 0.0) {
-                float mouseDist = distance(v_texCoord, mouse);
-                mouseInfluence = max(0.0, 0.1 - mouseDist) * 10.0;
-                distortion += (v_texCoord - mouse) * mouseInfluence * 0.05;
+                mouseDist = distance(v_texCoord, mouse);
+                mouseInfluence = max(.3, 1.0 - mouseDist) * 10.5;
+                distortion += (v_texCoord - mouse) * mouseInfluence * 0.01;
             }
+    
+
+            // Create a threshold to isolate the bright infinity path
+            float pathMask = 1.0;
+            
+            // Create subtle animation to make the path "breathe"
+            float breathing = sin(u_time * 1.0 + sin(mouse.x * mouse.y)) * 0.5 + 1.0;
+        
+            
+            // Enhanced path mask with breathing effect
+            pathMask = smoothstep(0.0, breathing, brightness);
+            float particles = 1.0;
             
             // Sample the texture with the distortion
             vec4 distortedColor = texture2D(u_image, v_texCoord + distortion);
-            brightness = (distortedColor.r + distortedColor.g + distortedColor.b) / 3.0;
-            
-            // Enhanced path mask with breathing effect
-            pathMask = smoothstep(0.3 - breathing, 0.5 + breathing, brightness);
-            
-            // Generate particles flowing along the path
-            float particles = createParticles(v_texCoord, brightness, u_time);
-            
+            brightness = (distortedColor.r + distortedColor.g + distortedColor.b) / 3.0 + particles * 0.5;
+
+            particles = 1.0;
+            if (brightness < 1.0 && brightness > 0.9) {
+                particles = createParticles(v_texCoord, brightness, u_time);
+            }
+
             // Combine base glow and particles
-            vec3 glowColor = vec3(0.0, 0.8, 1.0) * (pathMask + particles * pathMask);
+            //vec3 glowColor = (texColor.rgb * particles * pathMask * 1.5) * 0.5 + brightness * pathMask * vec3(0.4, 0.8, 0.8);
+            vec3 glowColor = (distortedColor.rgb * particles * pathMask * 1.5) * 0.5 + brightness * pathMask * vec3(0.4, 0.8, 0.8);
+            //vec3 glowColor = (texColor.rgb * particles * pathMask * 1.5) * 0.5;
             
-            // Add shimmer effect to the particles
-            float shimmer = sin(u_time * 8.0 + v_texCoord.x * 20.0 + v_texCoord.y * 20.0) * 0.5 + 0.5;
-            glowColor += vec3(0.5, 0.8, 1.0) * particles * shimmer * pathMask;
-            
-            // Ensure a dark background
-            vec3 finalColor = glowColor;
-            
-            gl_FragColor = vec4(finalColor, 1.0);
+            gl_FragColor = vec4(glowColor, 1);
         }
     </script>
     
