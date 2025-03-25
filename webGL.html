@@ -3,113 +3,328 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebGL Glowing Line</title>
+    <title>Glowing Infinity WebGL Effect</title>
     <style>
-        body { margin: 0; overflow: hidden; }
-        canvas { display: block; }
+        * {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+        body {
+            background-color: #000;
+        }
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
     </style>
 </head>
 <body>
-<canvas id="webgl-canvas"></canvas>
-<script>
-    const canvas = document.getElementById("webgl-canvas");
-    const gl = canvas.getContext("webgl");
-    if (!gl) {
-        console.error("WebGL not supported");
-    }
+    <canvas id="webgl-canvas"></canvas>
 
-    // Set canvas size
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-
-    // Vertex Shader code
-    const vertexShaderSource = `
-    attribute vec3 position;
-    uniform float time;
-    void main() {
-        // Animate points to create flowing line effect
-        float xOffset = sin(position.x + time) * 0.5;
-        float yOffset = cos(position.y + time) * 0.5;
-        gl_Position = vec4(position.x + xOffset, position.y + yOffset, position.z, 1.0);
-    }`;
-
-    // Fragment Shader code (Glow effect)
-    const fragmentShaderSource = `
-    precision mediump float;
-    uniform vec4 color;
-    void main() {
-        gl_FragColor = color;
-    }`;
-
-    // Function to compile shaders
-    function createShader(type, source) {
-        const shader = gl.createShader(type);
-        gl.shaderSource(shader, source);
-        gl.compileShader(shader);
-        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-            console.error("Shader compile failed", gl.getShaderInfoLog(shader));
+    <script id="vertex-shader" type="x-shader/x-vertex">
+        attribute vec2 a_position;
+        attribute vec2 a_texCoord;
+        
+        uniform mediump vec2 u_resolution;
+        uniform float u_time;
+        
+        varying vec2 v_texCoord;
+        
+        void main() {
+            // Convert position from pixels to 0.0 to 1.0
+            vec2 zeroToOne = a_position / u_resolution;
+            
+            // Convert from 0->1 to 0->2
+            vec2 zeroToTwo = zeroToOne * 2.0;
+            
+            // Convert from 0->2 to -1->+1 (clipspace)
+            vec2 clipSpace = zeroToTwo - 1.0;
+            
+            gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);
+            v_texCoord = a_texCoord;
         }
-        return shader;
-    }
-
-    // Create vertex and fragment shaders
-    const vertexShader = createShader(gl.VERTEX_SHADER, vertexShaderSource);
-    const fragmentShader = createShader(gl.FRAGMENT_SHADER, fragmentShaderSource);
-
-    // Create and link the shader program
-    const shaderProgram = gl.createProgram();
-    gl.attachShader(shaderProgram, vertexShader);
-    gl.attachShader(shaderProgram, fragmentShader);
-    gl.linkProgram(shaderProgram);
-    if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
-        console.error("Shader program linking failed", gl.getProgramInfoLog(shaderProgram));
-    }
-    gl.useProgram(shaderProgram);
-
-    // Define points for the line geometry (particle system)
-    const numPoints = 1000;
-    const positions = new Float32Array(numPoints * 3);
-    for (let i = 0; i < numPoints; i++) {
-        positions[i * 3] = Math.sin(i * 0.05);      // x-coordinate
-        positions[i * 3 + 1] = Math.cos(i * 0.05);  // y-coordinate
-        positions[i * 3 + 2] = 0.0;                 // z-coordinate (flat)
-    }
-
-    // Create a buffer to hold the position data
-    const positionBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
-
-    // Get attribute and uniform locations
-    const positionLocation = gl.getAttribLocation(shaderProgram, "position");
-    const timeLocation = gl.getUniformLocation(shaderProgram, "time");
-    const colorLocation = gl.getUniformLocation(shaderProgram, "color");
-
-    // Set up vertex attributes
-    gl.vertexAttribPointer(positionLocation, 3, gl.FLOAT, false, 0, 0);
-    gl.enableVertexAttribArray(positionLocation);
-
-    // Set the color of the glowing effect (light blue)
-    gl.uniform4f(colorLocation, 0.0, 1.0, 1.0, 1.0);  // Cyan color
-
-    // Set up a basic animation loop
-    let startTime = Date.now();
-    function animate() {
-        gl.clear(gl.COLOR_BUFFER_BIT);
-
-        // Calculate the time elapsed
-        const time = (Date.now() - startTime) / 1000;
-        gl.uniform1f(timeLocation, time);  // Pass the time uniform to the shaders
-
-        // Draw the line as points
-        gl.drawArrays(gl.POINTS, 0, numPoints);
-
-        // Call animate again on the next frame
-        requestAnimationFrame(animate);
-    }
-
-    // Initialize and start the animation loop
-    animate();
-</script>
+    </script>
+    
+    <script id="fragment-shader" type="x-shader/x-fragment">
+        precision mediump float;
+        
+        uniform sampler2D u_image;
+        uniform float u_time;
+        uniform vec2 u_resolution;
+        uniform vec2 u_mouse;
+        
+        varying vec2 v_texCoord;
+        
+        // Function to create particles flowing along the bright path
+        float createParticles(vec2 uv, float brightness, float time) {
+            // Create multiple particle waves with different speeds and phases
+            float particles = 0.0;
+            
+            // Base particle flow
+            float baseFlow = fract(brightness * 2.0 - time * 0.2);
+            float particleBase = smoothstep(0.0, 0.1, baseFlow) * smoothstep(1.0, 0.9, baseFlow);
+            
+            // Secondary particle flow (different speed)
+            float secondFlow = fract(brightness * 3.0 - time * 0.3 + 0.5);
+            float particleSecond = smoothstep(0.0, 0.05, secondFlow) * smoothstep(1.0, 0.95, secondFlow);
+            
+            // Combine particle effects
+            particles = max(particleBase * 0.8, particleSecond * 0.6);
+            
+            return particles;
+        }
+        
+        void main() {
+            // Sample the original texture
+            vec4 texColor = texture2D(u_image, v_texCoord);
+            
+            // Calculate the brightness of the current pixel
+            float brightness = (texColor.r + texColor.g + texColor.b) / 3.0;
+            
+            // Create a threshold to isolate the bright infinity path
+            float pathMask = smoothstep(0.3, 0.5, brightness);
+            
+            // Create subtle animation to make the path "breathe"
+            float breathing = 0.05 * sin(u_time * 0.5);
+            
+            // Apply a subtle distortion effect
+            vec2 distortion = vec2(
+                sin(v_texCoord.y * 10.0 + u_time * 0.2) * 0.002,
+                cos(v_texCoord.x * 10.0 + u_time * 0.2) * 0.002
+            );
+            
+            // Apply mouse influence when available
+            vec2 mouse = u_mouse / u_resolution;
+            float mouseInfluence = 0.0;
+            if (mouse.x > 0.0 || mouse.y > 0.0) {
+                float mouseDist = distance(v_texCoord, mouse);
+                mouseInfluence = max(0.0, 0.1 - mouseDist) * 10.0;
+                distortion += (v_texCoord - mouse) * mouseInfluence * 0.05;
+            }
+            
+            // Sample the texture with the distortion
+            vec4 distortedColor = texture2D(u_image, v_texCoord + distortion);
+            brightness = (distortedColor.r + distortedColor.g + distortedColor.b) / 3.0;
+            
+            // Enhanced path mask with breathing effect
+            pathMask = smoothstep(0.3 - breathing, 0.5 + breathing, brightness);
+            
+            // Generate particles flowing along the path
+            float particles = createParticles(v_texCoord, brightness, u_time);
+            
+            // Combine base glow and particles
+            vec3 glowColor = vec3(0.0, 0.8, 1.0) * (pathMask + particles * pathMask);
+            
+            // Add shimmer effect to the particles
+            float shimmer = sin(u_time * 8.0 + v_texCoord.x * 20.0 + v_texCoord.y * 20.0) * 0.5 + 0.5;
+            glowColor += vec3(0.5, 0.8, 1.0) * particles * shimmer * pathMask;
+            
+            // Ensure a dark background
+            vec3 finalColor = glowColor;
+            
+            gl_FragColor = vec4(finalColor, 1.0);
+        }
+    </script>
+    
+    <script>
+        // Initialize WebGL when the page is loaded
+        window.addEventListener('load', function() {
+            const canvas = document.getElementById('webgl-canvas');
+            const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+            
+            if (!gl) {
+                alert('WebGL is not supported in your browser');
+                return;
+            }
+            
+            // Resize canvas to fill the window
+            function resizeCanvas() {
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+                gl.viewport(0, 0, canvas.width, canvas.height);
+            }
+            
+            window.addEventListener('resize', resizeCanvas);
+            resizeCanvas();
+            
+            // Create shaders
+            const vertexShader = createShader(gl, gl.VERTEX_SHADER, document.getElementById('vertex-shader').text);
+            const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, document.getElementById('fragment-shader').text);
+            
+            // Create program
+            const program = createProgram(gl, vertexShader, fragmentShader);
+            
+            // Look up locations
+            const positionLocation = gl.getAttribLocation(program, 'a_position');
+            const texCoordLocation = gl.getAttribLocation(program, 'a_texCoord');
+            
+            // Create buffers
+            const positionBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            setRectangle(gl, 0, 0, canvas.width, canvas.height);
+            
+            const texCoordBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+                0.0, 0.0,
+                1.0, 0.0,
+                0.0, 1.0,
+                0.0, 1.0,
+                1.0, 0.0,
+                1.0, 1.0,
+            ]), gl.STATIC_DRAW);
+            
+            // Create texture
+            const texture = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, texture);
+            
+            // Set texture parameters
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+            
+            // Load the image
+            const image = new Image();
+            image.src = 'bg_still.png'; // Placeholder
+            // Initially load a 1x1 transparent pixel
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, 
+                        new Uint8Array([0, 0, 0, 255]));
+            
+            image.onload = function() {
+                gl.bindTexture(gl.TEXTURE_2D, texture);
+                gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+            };
+            
+            image.src = 'bg_still.png'; // Replace with your actual image
+            
+            // Mouse tracking
+            let mouseX = -1;
+            let mouseY = -1;
+            
+            canvas.addEventListener('mousemove', function(event) {
+                const rect = canvas.getBoundingClientRect();
+                mouseX = event.clientX - rect.left;
+                mouseY = event.clientY - rect.top;
+            });
+            
+            canvas.addEventListener('touchmove', function(event) {
+                event.preventDefault();
+                const rect = canvas.getBoundingClientRect();
+                mouseX = event.touches[0].clientX - rect.left;
+                mouseY = event.touches[0].clientY - rect.top;
+            });
+            
+            canvas.addEventListener('mouseleave', function() {
+                mouseX = -1;
+                mouseY = -1;
+            });
+            
+            // Listen for touch end to reset mouse position
+            canvas.addEventListener('touchend', function() {
+                mouseX = -1;
+                mouseY = -1;
+            });
+            
+            // Animation variables
+            let startTime = performance.now();
+            
+            // Draw the scene
+            function render() {
+                // Calculate time in seconds
+                const currentTime = performance.now();
+                const elapsedTime = (currentTime - startTime) / 1000;
+                
+                // Clear the canvas
+                gl.clearColor(0, 0, 0, 1);
+                gl.clear(gl.COLOR_BUFFER_BIT);
+                
+                // Use our program
+                gl.useProgram(program);
+                
+                // Set up the position attribute
+                gl.enableVertexAttribArray(positionLocation);
+                gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+                gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+                
+                // Set up the texture coordinate attribute
+                gl.enableVertexAttribArray(texCoordLocation);
+                gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer);
+                gl.vertexAttribPointer(texCoordLocation, 2, gl.FLOAT, false, 0, 0);
+                
+                // Set uniforms
+                const timeLocation = gl.getUniformLocation(program, 'u_time');
+                const resolutionLocation = gl.getUniformLocation(program, 'u_resolution');
+                const mouseLocation = gl.getUniformLocation(program, 'u_mouse');
+                
+                gl.uniform1f(timeLocation, elapsedTime);
+                gl.uniform2f(resolutionLocation, canvas.width, canvas.height);
+                gl.uniform2f(mouseLocation, mouseX, mouseY);
+                
+                // Draw the rectangle
+                gl.drawArrays(gl.TRIANGLES, 0, 6);
+                
+                // Request the next frame
+                requestAnimationFrame(render);
+            }
+            
+            // Start rendering
+            requestAnimationFrame(render);
+            
+            // Helper function to create a shader
+            function createShader(gl, type, source) {
+                const shader = gl.createShader(type);
+                gl.shaderSource(shader, source);
+                gl.compileShader(shader);
+                
+                // Check if compilation was successful
+                const success = gl.getShaderParameter(shader, gl.COMPILE_STATUS);
+                if (!success) {
+                    console.error('Could not compile shader:', gl.getShaderInfoLog(shader));
+                    gl.deleteShader(shader);
+                    return null;
+                }
+                
+                return shader;
+            }
+            
+            // Helper function to create a program
+            function createProgram(gl, vertexShader, fragmentShader) {
+                const program = gl.createProgram();
+                gl.attachShader(program, vertexShader);
+                gl.attachShader(program, fragmentShader);
+                gl.linkProgram(program);
+                
+                // Check if linking was successful
+                const success = gl.getProgramParameter(program, gl.LINK_STATUS);
+                if (!success) {
+                    console.error('Could not link program:', gl.getProgramInfoLog(program));
+                    gl.deleteProgram(program);
+                    return null;
+                }
+                
+                return program;
+            }
+            
+            // Helper function to set a rectangle
+            function setRectangle(gl, x, y, width, height) {
+                const x1 = x;
+                const x2 = x + width;
+                const y1 = y;
+                const y2 = y + height;
+                
+                gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+                    x1, y1,
+                    x2, y1,
+                    x1, y2,
+                    x1, y2,
+                    x2, y1,
+                    x2, y2,
+                ]), gl.STATIC_DRAW);
+            }
+        });
+    </script>
 </body>
 </html>
